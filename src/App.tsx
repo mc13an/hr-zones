@@ -1,4 +1,9 @@
-import { SubmitHandler, useFieldArray, useForm } from "react-hook-form";
+import {
+  SubmitHandler,
+  useFieldArray,
+  useForm,
+  Controller,
+} from "react-hook-form";
 import "./styles.css";
 import { useEffect, useState } from "react";
 import { LinePath } from "@visx/shape";
@@ -7,59 +12,64 @@ import { curveStepAfter } from "@visx/curve";
 import { AxisBottom, AxisLeft } from "@visx/axis";
 import { GridRows } from "@visx/grid";
 import { Threshold } from "@visx/threshold";
-import { differenceInMinutes } from "date-fns";
+import { isToday } from "date-fns";
+import DatePicker from "react-datepicker";
 
 interface HeartRateLimits {
   lowerLimit: string;
   upperLimit: string;
-  startDate: string;
+  startDate: Date;
 }
 
 interface FormValues {
   limits: HeartRateLimits[];
 }
 
-async function getZoneTwoLimits(): Promise<FormValues> {
-  const limits: HeartRateLimits[] = [
+interface Resp extends Omit<HeartRateLimits, "startDate"> {
+  startDate: string;
+}
+
+async function getZoneTwoLimits(): Promise<{ limits: Resp[] }> {
+  const limits: Resp[] = [
     {
       lowerLimit: "138",
       upperLimit: "143",
-      startDate: "2023-02-01"
+      startDate: "2023-02-01",
     },
     {
       lowerLimit: "120",
       upperLimit: "127",
-      startDate: "2023-04-10"
+      startDate: "2023-04-10",
     },
     {
       lowerLimit: "130",
       upperLimit: "140",
-      startDate: "2023-05-05"
-    }
+      startDate: "2023-05-05",
+    },
   ];
   return new Promise((resolve) =>
     setTimeout(() => {
       resolve({ limits });
-    }, 2000)
+    }, 2000),
   );
 }
 
 const xScale = scaleTime<number>({
   range: [0, 575],
-  domain: [new Date("2022-12-01"), new Date()]
+  domain: [new Date("2022-12-01"), new Date()],
 });
 
 const yScale = scaleLinear<number>({
   range: [175, 0],
-  domain: [90, 180]
+  domain: [90, 180],
 });
 
 const addTodayToLine = (line: HeartRateLimits[]): HeartRateLimits => {
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date();
   const lastEntry = line[line.length - 1];
   const data: HeartRateLimits = {
     ...lastEntry,
-    startDate: today
+    startDate: today,
   };
 
   return data;
@@ -76,26 +86,25 @@ export default function App() {
     watch,
     setFocus,
 
-    formState: { errors }
+    formState: { errors },
   } = useForm<FormValues>({
     defaultValues: async () => {
       const resp = await getZoneTwoLimits();
-      const today = addTodayToLine(resp.limits);
-      setLine([...resp.limits, today]);
+      // const today = addTodayToLine(resp.limits);
+      // setLine([...resp.limits, today]);
       setIsLoading(false);
-      return resp;
+      return {
+        limits: resp.limits.map((limits) => ({
+          ...limits,
+          startDate: new Date(limits.startDate),
+        })),
+      };
     },
-    mode: "onChange"
+    mode: "onChange",
   });
   const { fields, append, remove, replace } = useFieldArray({
     name: "limits",
     control,
-    rules: {
-      validate: (value, values) => {
-        console.log("validate", value, values);
-        return true;
-      }
-    }
   });
 
   const onSubmit: SubmitHandler<FormValues> = (data, e) => {
@@ -109,7 +118,7 @@ export default function App() {
     append({
       lowerLimit: last.lowerLimit,
       upperLimit: last.upperLimit,
-      startDate: new Date().toISOString().split("T")[0]
+      startDate: new Date(),
     });
   };
 
@@ -119,32 +128,44 @@ export default function App() {
 
       if (value?.limits) {
         const { limits } = value;
-        const lastEntry = limits[limits.length - 1];
-        const today = new Date().toISOString().split("T")[0];
+        let line: HeartRateLimits[];
 
+        // If we are messing with start dates make sure the sort order is correct
         if (name?.includes("startDate")) {
+          const index = name.split(".")[1];
+          const editedInput = limits[parseInt(index, 10)];
+          for (let i = 0; i < limits.length; i++) {
+            if (parseInt(index, 10) === i) {
+              continue;
+            }
+            const element = limits[i];
+            if (element?.startDate) {
+            }
+          }
           const sorted = limits.sort((a, b) => {
-            if (
-              new Date(a?.startDate as string) <
-              new Date(b?.startDate as string)
-            ) {
+            if (!a?.startDate || !b?.startDate) {
+              return 0;
+            }
+
+            if (a.startDate < b?.startDate) {
               return -1;
-            } else if (
-              new Date(a?.startDate as string) >
-              new Date(b?.startDate as string)
-            ) {
+            } else if (a?.startDate > b?.startDate) {
               return 1;
             }
             return 0;
           });
+          line = sorted as HeartRateLimits[];
           replace(sorted as HeartRateLimits[]);
+        } else {
+          line = limits as HeartRateLimits[];
         }
 
-        if (today === lastEntry?.startDate) {
-          setLine(sorted as HeartRateLimits[]);
+        const lastEntry = limits[limits.length - 1];
+        if (lastEntry?.startDate && isToday(lastEntry.startDate)) {
+          setLine(line);
         } else {
           const today = addTodayToLine(limits as HeartRateLimits[]);
-          setLine([...(sorted as HeartRateLimits[]), today]);
+          setLine([...line, today]);
         }
       }
     });
@@ -185,7 +206,7 @@ export default function App() {
             clipBelowTo={0}
             belowAreaProps={{
               fill: "blue",
-              fillOpacity: 0.4
+              fillOpacity: 0.4,
             }}
             curve={curveStepAfter}
           />
@@ -229,34 +250,24 @@ export default function App() {
                 <input
                   type="number"
                   {...register(`limits.${index}.lowerLimit`, {
-                    required: true
+                    required: true,
                   })}
                 />
                 <input
                   type="number"
                   {...register(`limits.${index}.upperLimit`, {
-                    required: true
+                    required: true,
                   })}
                 />
-                <input
-                  type="date"
-                  {...register(`limits.${index}.startDate`, {
-                    required: true,
-
-                    validate: (v, { limits }) => {
-                      const index = limits.findIndex(
-                        ({ startDate }) => startDate === v
-                      );
-                      const previous = limits[index - 1];
-                      if (
-                        previous &&
-                        new Date(previous.startDate) > new Date(v)
-                      ) {
-                        return "start date cannot be before previous period";
-                      }
-                      return true;
-                    }
-                  })}
+                <Controller
+                  control={control}
+                  name={`limits.${index}.startDate`}
+                  render={({ field }) => (
+                    <DatePicker
+                      onChange={field.onChange}
+                      selected={field.value}
+                    />
+                  )}
                 />
                 <button onClick={() => remove(index)}>remove</button>
               </section>
